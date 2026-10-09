@@ -221,7 +221,73 @@ class TestSmartClassroomEnergy(unittest.TestCase):
         self.assertEqual(data_vacant["telemetry"]["light"], 0, "Light must turn OFF automatically when no person is detected")
         self.assertIn("OFF", data_vacant["action"])
 
+    # ------------------------------------------------------------------------
+    # Scenario 9: Security hardening, CSP, and timing-safe authentication
+    # ------------------------------------------------------------------------
+    def test_scenario_9_security_hardening_and_headers(self):
+        # 1. Verify HTTP Security Headers & Content Security Policy (CSP)
+        res = self.client.get("/api/health")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.headers.get("X-Content-Type-Options"), "nosniff")
+        self.assertEqual(res.headers.get("X-Frame-Options"), "SAMEORIGIN")
+        self.assertEqual(res.headers.get("X-XSS-Protection"), "1; mode=block")
+        self.assertIn("default-src 'self'", res.headers.get("Content-Security-Policy", ""))
+        self.assertIn("script-src", res.headers.get("Content-Security-Policy", ""))
+
+        # 2. Timing-safe authentication rejection for missing / invalid API Key
+        unauth_res = self.client.post("/api/telemetry",
+                                      data=json.dumps(dict(classroom_id=1, pir=1, temp=25.0, humidity=50.0, lux=300.0)),
+                                      content_type="application/json",
+                                      headers={"X-API-Key": "invalid-secret-token"})
+        self.assertEqual(unauth_res.status_code, 401)
+        self.assertIn("invalid or missing X-API-Key", unauth_res.get_json()["error"])
+
+        # 3. Valid API Key accepted
+        auth_res = self.client.post("/api/telemetry",
+                                    data=json.dumps(dict(classroom_id=1, pir=1, temp=25.0, humidity=50.0, lux=300.0)),
+                                    content_type="application/json",
+                                    headers={"X-API-Key": C.API_KEY})
+        self.assertEqual(auth_res.status_code, 200)
+
+    # ------------------------------------------------------------------------
+    # Scenario 10: Input sanitization, bounds checking, and structured errors
+    # ------------------------------------------------------------------------
+    def test_scenario_10_input_sanitization_and_bad_request(self):
+        # 1. Invalid JSON body on override
+        bad_override = self.client.post("/api/classrooms/1/override",
+                                        data="not-a-json-object",
+                                        content_type="application/json")
+        self.assertEqual(bad_override.status_code, 400)
+
+        # 2. Invalid mode parameter
+        invalid_mode = self.client.post("/api/classrooms/1/override",
+                                        data=json.dumps(dict(mode="invalid_mode")),
+                                        content_type="application/json")
+        self.assertEqual(invalid_mode.status_code, 400)
+
+        # 3. Out-of-bounds timetable insertion
+        bad_timetable = self.client.post("/api/timetable",
+                                         data=json.dumps(dict(classroom_id=1, dow=9, start_min=500, end_min=400, subject="Test", students=-5)),
+                                         content_type="application/json")
+        self.assertEqual(bad_timetable.status_code, 400)
+
+    # ------------------------------------------------------------------------
+    # Scenario 11: Sliding-window rate limiter protection
+    # ------------------------------------------------------------------------
+    def test_scenario_11_rate_limiting(self):
+        from app import RateLimiter
+        limiter = RateLimiter(limit_per_min=5)
+        client_ip = "192.168.1.100"
+
+        # First 5 requests must pass
+        for _ in range(5):
+            self.assertTrue(limiter.is_allowed(client_ip))
+
+        # 6th request must be rejected
+        self.assertFalse(limiter.is_allowed(client_ip), "Rate limiter must throttle client after exceeding limit")
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

@@ -1,17 +1,22 @@
-"""Tiny SQLite layer (one shared connection guarded by a re-entrant lock)."""
+"""SQLite database abstraction layer with thread-safe connection pooling and transactions.
+
+Provides parameterized query execution, schema initialization, high-performance WAL
+journaling, and memory caching pragmas.
+"""
+from contextlib import contextmanager
+from typing import Any, Dict, List, Optional, Sequence, Union
 import os
 import sqlite3
 import threading
-from contextlib import contextmanager
 
 from config import DB_PATH
 from timetable import ROOMS, build_timetable
 
 _lock = threading.RLock()
-_conn = None
-_depth = 0
+_conn: Optional[sqlite3.Connection] = None
+_depth: int = 0
 
-SCHEMA = """
+SCHEMA: str = """
 CREATE TABLE IF NOT EXISTS classrooms (
     id INTEGER PRIMARY KEY, name TEXT, kind TEXT, building TEXT, capacity INTEGER,
     light_w INTEGER, fan_w INTEGER, ac_w INTEGER
@@ -36,10 +41,13 @@ CREATE TABLE IF NOT EXISTS state (
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, classroom_id INTEGER, kind TEXT, message TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_events_id ON events(id DESC);
+CREATE INDEX IF NOT EXISTS idx_timetable_cid_dow ON timetable(classroom_id, dow);
 """
 
 
-def conn():
+def conn() -> sqlite3.Connection:
+    """Return the shared thread-safe SQLite connection initialized with high-performance pragmas."""
     global _conn
     if _conn is None:
         db_dir = os.path.dirname(os.path.abspath(DB_PATH))
@@ -49,12 +57,15 @@ def conn():
         _conn.row_factory = sqlite3.Row
         _conn.execute("PRAGMA journal_mode=WAL")
         _conn.execute("PRAGMA synchronous=NORMAL")
+        _conn.execute("PRAGMA foreign_keys=ON")
+        _conn.execute("PRAGMA cache_size=-64000")
+        _conn.execute("PRAGMA temp_store=MEMORY")
     return _conn
 
 
 @contextmanager
 def transaction():
-    """Group many writes into one commit (used by the backfill)."""
+    """Context manager grouping multiple database write operations into a single atomic commit."""
     global _depth
     with _lock:
         _depth += 1
@@ -66,17 +77,36 @@ def transaction():
                 conn().commit()
 
 
-def q(sql, args=()):
+def q(sql: str, args: Union[Sequence[Any], Dict[str, Any]] = ()) -> List[Dict[str, Any]]:
+    """Execute a parameterized SQL query and return rows as standard Python dictionaries.
+
+    Args:
+        sql: Parameterized SQL statement with ? or :named placeholders.
+        args: Sequence or mapping of parameters to bind safely.
+
+    Returns:
+        List of dictionaries corresponding to the query result rows.
+    """
     with _lock:
         return [dict(r) for r in conn().execute(sql, args).fetchall()]
 
 
-def one(sql, args=()):
+def one(sql: str, args: Union[Sequence[Any], Dict[str, Any]] = ()) -> Optional[Dict[str, Any]]:
+    """Execute a parameterized query expecting at most one row.
+
+    Returns:
+        Dictionary representing the first matching row, or None if no match.
+    """
     rows = q(sql, args)
     return rows[0] if rows else None
 
 
-def x(sql, args=()):
+def x(sql: str, args: Union[Sequence[Any], Dict[str, Any]] = ()) -> Optional[int]:
+    """Execute a parameterized DML/DDL statement (INSERT, UPDATE, DELETE).
+
+    Returns:
+        The lastrowid integer if available, or None.
+    """
     with _lock:
         cur = conn().execute(sql, args)
         if _depth == 0:
@@ -84,7 +114,8 @@ def x(sql, args=()):
         return cur.lastrowid
 
 
-def init_db():
+def init_db() -> None:
+    """Initialize database tables, indexes, and baseline seed data if empty."""
     with _lock:
         conn().executescript(SCHEMA)
         if not one("SELECT 1 AS n FROM classrooms"):
