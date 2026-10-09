@@ -1,4 +1,5 @@
 """Tiny SQLite layer (one shared connection guarded by a re-entrant lock)."""
+import os
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -41,6 +42,9 @@ CREATE TABLE IF NOT EXISTS events (
 def conn():
     global _conn
     if _conn is None:
+        db_dir = os.path.dirname(os.path.abspath(DB_PATH))
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
         _conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         _conn.row_factory = sqlite3.Row
         _conn.execute("PRAGMA journal_mode=WAL")
