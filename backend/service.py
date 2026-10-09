@@ -27,7 +27,8 @@ def now_iso():
 
 
 def _abs_min(ts):
-    return int(datetime.fromisoformat(ts).timestamp() // 60)
+    dt = datetime.fromisoformat(ts)
+    return dt.date().toordinal() * 1440 + dt.hour * 60 + dt.minute
 
 
 def _baseline_w(room, dt, actual_w):

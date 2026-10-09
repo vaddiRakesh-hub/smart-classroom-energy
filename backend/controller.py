@@ -23,9 +23,12 @@ def decide(prob, f, prev, room):
         why = f"Empty ({pct}% occupancy chance, no motion for {int(idle)} min) - all appliances OFF"
         return 0, 0, 0, 0, why
 
-    # 2) Uncertain -> keep what we have (never switch off a room that may be in use)
+    # 2) Uncertain or in Grace Period -> keep what we have (never switch off a room that may be in use)
     if prob < C.P_OCCUPIED:
-        why = f"Uncertain ({pct}%) - holding current state"
+        if prob <= C.P_VACANT:
+            why = f"Grace period ({pct}% chance, idle for {int(idle)}/{C.GRACE_MIN} min) - holding state"
+        else:
+            why = f"Uncertain ({pct}%) - holding current state"
         return prev["light"], prev["fan"], prev["ac"], 0, why
 
     # 3) Occupied -> switch only what comfort needs

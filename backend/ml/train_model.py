@@ -14,9 +14,13 @@ from datetime import date, timedelta
 
 import joblib
 import numpy as np
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import (accuracy_score, confusion_matrix, f1_score,
-                             precision_score, recall_score, roc_auc_score)
+try:
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.metrics import (accuracy_score, confusion_matrix, f1_score,
+                                 precision_score, recall_score, roc_auc_score)
+except ImportError as err:
+    RandomForestClassifier = None
+    accuracy_score = confusion_matrix = f1_score = precision_score = recall_score = roc_auc_score = None
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import METRICS_PATH, MODEL_PATH, STEP_MIN        # noqa: E402
@@ -59,6 +63,8 @@ def evaluate(y_true, y_pred, y_prob=None):
 
 
 def train(days=100, verbose=True):
+    if RandomForestClassifier is None:
+        raise RuntimeError("scikit-learn is required to train the model, but could not be loaded on this system.")
     X, y, day_idx, _ = generate_dataset(days)
     split = int(days * 0.8)                       # chronological split: last 20 % of days = test
     tr, te = day_idx < split, day_idx >= split

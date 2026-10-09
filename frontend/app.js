@@ -42,9 +42,10 @@ function renderHero(o) {
 
 function renderStats(o) {
   const t = o.totals;
+  const rate = t.tariff_inr_per_kwh || (t.saved_kwh > 0 ? (t.cost_saved_inr / t.saved_kwh).toFixed(0) : 8);
   const items = [
     [`${t.saved_kwh} kWh`, `saved today (${t.saved_pct}% less than leaving everything on)`],
-    [`Rs ${t.cost_saved_inr.toLocaleString("en-IN")}`, `saved today at Rs ${(t.cost_saved_inr / (t.saved_kwh || 1)).toFixed(0)} per kWh`],
+    [`Rs ${t.cost_saved_inr.toLocaleString("en-IN")}`, `saved today at Rs ${rate} per kWh`],
     [`${t.co2_saved_kg} kg`, "CO2 emissions avoided today"],
     [`${t.appliances_on}`, `appliances running across ${t.rooms_total} rooms`],
   ];
@@ -77,6 +78,7 @@ function renderRooms(o) {
 
 /* ---------- charts ---------- */
 function barChart({ labels, a, b, w = 560, h = 190, highlight = -1, sub = [] }) {
+  if (!labels || !labels.length) return '<div class="empty" style="padding:1rem">No data available</div>';
   const pad = { l: 34, r: 6, t: 8, b: sub.length ? 40 : 24 };
   const max = Math.max(0.1, ...a, ...b);
   const step = (w - pad.l - pad.r) / labels.length;
@@ -168,6 +170,7 @@ function closeDrawer() {
 async function renderDrawer() {
   if (selected == null || !lastOverview || drawerBusy) return;
   const r = lastOverview.rooms.find((x) => x.id === selected);
+  if (!r) return;
   const h = await api(`/api/classrooms/${selected}/history`);
   const manual = r.mode === "manual";
   const toggles = ["light", "fan", "ac"].filter((k) => k !== "ac" || r.has_ac).map((k) =>
@@ -177,8 +180,8 @@ async function renderDrawer() {
       <button class="close" aria-label="Close details">&times;</button></div>
     <div class="why"><b>${r.occupied ? "Occupied" : "Vacant"}.</b> ${esc(r.reason)}</div>
     <div class="sens">
-      <div><b>${r.temp}&deg;C</b><span>Temperature</span></div><div><b>${r.humidity}%</b><span>Humidity</span></div>
-      <div><b>${Math.round(r.lux)}</b><span>Light (lux)</span></div><div><b>${r.pir ? "Yes" : "No"}</b><span>Motion seen</span></div>
+      <div><b>${r.temp != null ? r.temp + "&deg;C" : "--"}</b><span>Temperature</span></div><div><b>${r.humidity != null ? r.humidity + "%" : "--"}</b><span>Humidity</span></div>
+      <div><b>${r.lux != null ? Math.round(r.lux) : "--"}</b><span>Light (lux)</span></div><div><b>${r.pir ? "Yes" : "No"}</b><span>Motion seen</span></div>
     </div>
     <h3>Occupancy chance and power today</h3>
     ${roomChart(h, lastOverview.now)}
@@ -207,13 +210,15 @@ document.addEventListener("click", (e) => {
   if (tile) return openDrawer(+tile.dataset.id);
   if (e.target.closest(".close") || e.target.id === "scrim") return closeDrawer();
   const mode = e.target.closest("[data-mode]");
-  if (mode) {
-    const r = lastOverview.rooms.find((x) => x.id === selected);
+  if (mode && selected != null) {
+    const r = lastOverview?.rooms?.find((x) => x.id === selected);
+    if (!r) return;
     return sendOverride(mode.dataset.mode === "auto" ? { mode: "auto" } : { mode: "manual", light: r.light, fan: r.fan, ac: r.ac });
   }
   const tg = e.target.closest("[data-app]");
-  if (tg) {
-    const r = lastOverview.rooms.find((x) => x.id === selected);
+  if (tg && selected != null) {
+    const r = lastOverview?.rooms?.find((x) => x.id === selected);
+    if (!r) return;
     const next = { mode: "manual", light: r.light, fan: r.fan, ac: r.ac };
     next[tg.dataset.app] = r[tg.dataset.app] ? 0 : 1;
     return sendOverride(next);

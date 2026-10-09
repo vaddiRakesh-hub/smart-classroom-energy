@@ -45,7 +45,8 @@ def kpis(rows):
     return dict(energy_kwh=round(e, 2), baseline_kwh=round(b, 2), saved_kwh=round(saved, 2),
                 saved_pct=round(100 * saved / b, 1) if b else 0.0,
                 cost_saved_inr=round(saved * C.TARIFF_INR_PER_KWH),
-                co2_saved_kg=round(saved * C.CO2_KG_PER_KWH, 1))
+                co2_saved_kg=round(saved * C.CO2_KG_PER_KWH, 1),
+                tariff_inr_per_kwh=C.TARIFF_INR_PER_KWH)
 
 
 # --------------------------------------------------------------------------
@@ -95,27 +96,41 @@ def overview():
 @app.get("/api/energy/hourly")
 def hourly():
     day = request.args.get("date") or latest_ts()[:10]
+    try:
+        datetime.fromisoformat(day)
+    except ValueError:
+        day = latest_ts()[:10]
     rows = db.q("""SELECT CAST(substr(ts,12,2) AS INTEGER) AS hour,
-                          SUM(power_w*interval_min/60000.0) AS actual_kwh,
-                          SUM(baseline_w*interval_min/60000.0) AS baseline_kwh
+                          COALESCE(SUM(power_w*interval_min/60000.0), 0) AS actual_kwh,
+                          COALESCE(SUM(baseline_w*interval_min/60000.0), 0) AS baseline_kwh
                    FROM readings WHERE ts LIKE ? GROUP BY hour ORDER BY hour""", (day + "%",))
     by_hour = {r["hour"]: r for r in rows}
-    out = [dict(hour=h, actual_kwh=round(by_hour.get(h, {}).get("actual_kwh", 0), 3),
-                baseline_kwh=round(by_hour.get(h, {}).get("baseline_kwh", 0), 3)) for h in range(24)]
+    out = [dict(hour=h, actual_kwh=round(float(by_hour.get(h, {}).get("actual_kwh") or 0), 3),
+                baseline_kwh=round(float(by_hour.get(h, {}).get("baseline_kwh") or 0), 3)) for h in range(24)]
     return jsonify(date=day, hours=out)
 
 
 @app.get("/api/energy/daily")
 def daily():
-    days = min(int(request.args.get("days", 7)), 60)
-    rows = db.q("""SELECT substr(ts,1,10) AS date, SUM(power_w*interval_min/60000.0) AS actual_kwh,
-                          SUM(baseline_w*interval_min/60000.0) AS baseline_kwh, COUNT(DISTINCT substr(ts,12,5)) AS slots
+    try:
+        days = max(1, min(int(request.args.get("days", 7)), 60))
+    except (ValueError, TypeError):
+        days = 7
+    rows = db.q("""SELECT substr(ts,1,10) AS date,
+                          COALESCE(SUM(power_w*interval_min/60000.0), 0) AS actual_kwh,
+                          COALESCE(SUM(baseline_w*interval_min/60000.0), 0) AS baseline_kwh,
+                          COUNT(DISTINCT substr(ts,12,5)) AS slots
                    FROM readings GROUP BY date ORDER BY date DESC LIMIT ?""", (days,))
     rows.reverse()
     for r in rows:
-        r["saved_kwh"] = round(max(0, r["baseline_kwh"] - r["actual_kwh"]), 2)
-        r["actual_kwh"], r["baseline_kwh"] = round(r["actual_kwh"], 2), round(r["baseline_kwh"], 2)
-        r["weekday"] = datetime.fromisoformat(r["date"]).weekday()
+        act = float(r["actual_kwh"] or 0)
+        base = float(r["baseline_kwh"] or 0)
+        r["saved_kwh"] = round(max(0.0, base - act), 2)
+        r["actual_kwh"], r["baseline_kwh"] = round(act, 2), round(base, 2)
+        try:
+            r["weekday"] = datetime.fromisoformat(r["date"]).weekday()
+        except ValueError:
+            r["weekday"] = 0
     full = [r for r in rows if r["slots"] >= 280 and r["weekday"] < 5]      # complete working days only
     avg = sum(r["saved_kwh"] for r in full) / len(full) if full else 0
     return jsonify(days=rows, avg_saved_kwh_per_working_day=round(avg, 1),
@@ -125,12 +140,19 @@ def daily():
 
 @app.get("/api/classrooms/<int:rid>/history")
 def history(rid):
+    if rid not in service.rooms():
+        return jsonify(error="unknown classroom"), 404
     day = request.args.get("date") or latest_ts()[:10]
+    try:
+        weekday = datetime.fromisoformat(day).weekday()
+    except ValueError:
+        day = latest_ts()[:10]
+        weekday = datetime.fromisoformat(day).weekday()
     rows = db.q("""SELECT ts,pir,temp,humidity,lux,prob,light,fan,ac,power_w,baseline_w FROM readings
                    WHERE classroom_id=? AND ts LIKE ? ORDER BY ts""", (rid, day + "%"))
     return jsonify(date=day, thresholds=dict(occupied=C.P_OCCUPIED, vacant=C.P_VACANT), readings=rows,
                    timetable=db.q("SELECT start_min,end_min,subject FROM timetable WHERE classroom_id=? AND dow=? ORDER BY start_min",
-                                  (rid, datetime.fromisoformat(day).weekday())))
+                                  (rid, weekday)))
 
 
 @app.post("/api/classrooms/<int:rid>/override")
@@ -140,7 +162,7 @@ def override(rid):
     if not room:
         return jsonify(error="unknown classroom"), 404
     if body.get("mode") == "auto":
-        db.x("UPDATE state SET mode='auto' WHERE classroom_id=?", (rid,))
+        db.x("UPDATE state SET mode='auto',reason='Automation resumed - awaiting next reading' WHERE classroom_id=?", (rid,))
         db.x("INSERT INTO events (ts,classroom_id,kind,message) VALUES (?,?,?,?)",
              (latest_ts(), rid, "mode", "Automation resumed"))
     else:
@@ -168,10 +190,25 @@ def timetable():
 def add_timetable():
     b = request.get_json(force=True)
     try:
-        row = (int(b["classroom_id"]), int(b["dow"]), int(b["start_min"]), int(b["end_min"]),
-               str(b["subject"])[:60], int(b["students"]))
-    except (KeyError, ValueError):
-        return jsonify(error="need classroom_id, dow, start_min, end_min, subject, students"), 400
+        cid = int(b["classroom_id"])
+        dow = int(b["dow"])
+        s_min = int(b["start_min"])
+        e_min = int(b["end_min"])
+        subj = str(b["subject"]).strip()[:60]
+        students = int(b["students"])
+        if cid not in service.rooms():
+            return jsonify(error="unknown classroom_id"), 400
+        if not (0 <= dow <= 6):
+            return jsonify(error="dow must be between 0 (Mon) and 6 (Sun)"), 400
+        if not (0 <= s_min < e_min <= 1440):
+            return jsonify(error="start_min must be >= 0 and < end_min <= 1440"), 400
+        if not subj:
+            return jsonify(error="subject cannot be empty"), 400
+        if students < 0:
+            return jsonify(error="students cannot be negative"), 400
+        row = (cid, dow, s_min, e_min, subj, students)
+    except (KeyError, ValueError, TypeError) as err:
+        return jsonify(error=f"invalid request parameters: {err}"), 400
     db.x("INSERT INTO timetable (classroom_id,dow,start_min,end_min,subject,students) VALUES (?,?,?,?,?,?)", row)
     service.reload_cache()
     return jsonify(ok=True), 201
@@ -192,8 +229,13 @@ def index():
     return send_from_directory(C.FRONTEND_DIR, "index.html")
 
 
+_bootstrapped = False
+
+
 def bootstrap():
-    global sim
+    global sim, _bootstrapped
+    if _bootstrapped:
+        return
     db.init_db()
     service.reload_cache()
     predictor.get_model()
@@ -201,6 +243,13 @@ def bootstrap():
         from simulator import Simulator
         sim = Simulator()
         sim.start()
+    _bootstrapped = True
+
+
+@app.before_request
+def ensure_bootstrapped():
+    if not _bootstrapped:
+        bootstrap()
 
 
 if __name__ == "__main__":
@@ -208,3 +257,4 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     print(f"\n  Smart Classroom Energy running at http://localhost:{port}\n")
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+
