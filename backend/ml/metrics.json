@@ -1,0 +1,62 @@
+{
+  "samples_train": 92160,
+  "samples_test": 23040,
+  "occupied_share": 0.208,
+  "random_forest": {
+    "accuracy": 0.9527,
+    "precision": 0.8696,
+    "recall": 0.9051,
+    "f1": 0.887,
+    "roc_auc": 0.9798
+  },
+  "baseline_motion_only": {
+    "accuracy": 0.8868,
+    "precision": 0.6685,
+    "recall": 0.8875,
+    "f1": 0.7626
+  },
+  "baseline_timetable_only": {
+    "accuracy": 0.9433,
+    "precision": 0.8939,
+    "recall": 0.8208,
+    "f1": 0.8558
+  },
+  "confusion_matrix": [
+    [
+      17677,
+      641
+    ],
+    [
+      448,
+      4274
+    ]
+  ],
+  "feature_importance": {
+    "expected_ratio": 0.2514,
+    "scheduled_now": 0.2477,
+    "mins_since_motion": 0.1803,
+    "motion_ratio_15m": 0.135,
+    "pir": 0.0613,
+    "hour_frac": 0.0345,
+    "mins_to_next_class": 0.0201,
+    "mins_since_class_end": 0.0194,
+    "dow": 0.0154,
+    "lux": 0.0128,
+    "temp": 0.012,
+    "humidity": 0.0102
+  },
+  "features": [
+    "hour_frac",
+    "dow",
+    "scheduled_now",
+    "mins_to_next_class",
+    "mins_since_class_end",
+    "expected_ratio",
+    "pir",
+    "motion_ratio_15m",
+    "mins_since_motion",
+    "lux",
+    "temp",
+    "humidity"
+  ]
+}
