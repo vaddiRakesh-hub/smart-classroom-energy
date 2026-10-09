@@ -187,6 +187,41 @@ class TestSmartClassroomEnergy(unittest.TestCase):
         res_404 = self.client.get("/api/classrooms/999/history")
         self.assertEqual(res_404.status_code, 404)
 
+    # ------------------------------------------------------------------------
+    # Scenario 8: Sensor presence detection - Auto light shutoff when empty
+    # ------------------------------------------------------------------------
+    def test_scenario_8_sensor_vacancy_light_auto_shutoff(self):
+        # 1. Direct controller decision: sensor detects no person (PIR=0)
+        room = dict(id=1, name="CS-101", ac_w=1500, light_w=240, fan_w=300)
+        prev = dict(light=1, fan=1, ac=1)
+        f_empty = dict(temp=25.0, humidity=50.0, lux=350.0, mins_since_motion=12.0,
+                       motion_ratio_15m=0.0, scheduled_now=0, pir=0)
+        prob = 0.05
+        light, fan, ac, occupied, reason = controller.decide(prob, f_empty, prev, room)
+        self.assertEqual(light, 0, "Light must be turned OFF automatically when no person is detected")
+        self.assertEqual(occupied, 0)
+        self.assertIn("No person detected by sensor", reason)
+
+        # 2. Endpoint simulation: Person enters classroom -> Light turns ON
+        res_entered = self.client.post("/api/classrooms/1/sensor_test",
+                                       data=json.dumps({"occupied": True}),
+                                       content_type="application/json")
+        self.assertEqual(res_entered.status_code, 200)
+        data_entered = res_entered.get_json()
+        self.assertTrue(data_entered["ok"])
+        self.assertEqual(data_entered["telemetry"]["light"], 1, "Light turns ON when person enters dim room")
+
+        # 3. Endpoint simulation: No person available in classroom -> Light turns OFF automatically
+        res_vacant = self.client.post("/api/classrooms/1/sensor_test",
+                                      data=json.dumps({"occupied": False}),
+                                      content_type="application/json")
+        self.assertEqual(res_vacant.status_code, 200)
+        data_vacant = res_vacant.get_json()
+        self.assertTrue(data_vacant["ok"])
+        self.assertEqual(data_vacant["telemetry"]["light"], 0, "Light must turn OFF automatically when no person is detected")
+        self.assertIn("OFF", data_vacant["action"])
+
 
 if __name__ == "__main__":
     unittest.main()
+

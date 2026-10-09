@@ -71,7 +71,7 @@ def process_batch(payloads):
                                     p["lux"], ratio, since))
         ctx.append((room, dt, dict(temp=p["temp"], humidity=p["humidity"], lux=p["lux"],
                                    mins_since_motion=since, motion_ratio_15m=ratio,
-                                   scheduled_now=vectors[-1][2])))
+                                   scheduled_now=vectors[-1][2], pir=p["pir"])))
     probs = predictor.predict(vectors)
 
     out = []

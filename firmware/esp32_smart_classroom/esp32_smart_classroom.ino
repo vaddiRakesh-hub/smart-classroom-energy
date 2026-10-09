@@ -26,11 +26,13 @@ const char* SERVER_URL    = "http://192.168.1.50:5000/api/telemetry";  // PC run
 const char* API_KEY       = "sce-demo-key";                            // must match SCE_API_KEY
 const int   CLASSROOM_ID  = 1;                                         // row id in the classrooms table
 const unsigned long REPORT_INTERVAL = 5UL * 60UL * 1000UL;             // 5 minutes (use 15000 for demos)
-const unsigned long FALLBACK_TIMEOUT = 15UL * 60UL * 1000UL;
+const unsigned long VACANCY_LIGHT_TIMEOUT = 3UL * 60UL * 1000UL;       // 3 min without person -> auto turn OFF lights
+const unsigned long FALLBACK_TIMEOUT = 10UL * 60UL * 1000UL;
 // --------------------------------
 
 // Pins
-const int PIN_PIR   = 27;   // HC-SR501 / AM312 output
+const int PIN_PIR   = 27;   // HC-SR501 / AM312 PIR motion sensor
+const int PIN_RADAR = 14;   // Optional secondary radar/ultrasonic sensor (-1 to disable)
 const int PIN_DHT   = 4;    // DHT22 data
 const int PIN_SDA   = 21;   // BH1750 SDA
 const int PIN_SCL   = 22;   // BH1750 SCL
@@ -44,6 +46,7 @@ BH1750 lightMeter;
 
 volatile bool motionLatched = false;
 unsigned long lastReport = 0, lastMotionMs = 0;
+bool currentLight = false, currentFan = false, currentAc = false;
 
 void IRAM_ATTR onMotion() { motionLatched = true; }
 
@@ -53,11 +56,15 @@ void setRelay(int pin, bool on) {
 }
 
 void applyCommands(bool light, bool fan, bool ac) {
+  currentLight = light;
+  currentFan = fan;
+  currentAc = ac;
   setRelay(PIN_RELAY_LIGHT, light);
   setRelay(PIN_RELAY_FAN, fan);
   setRelay(PIN_RELAY_AC, ac);
   Serial.printf("Relays -> light:%d fan:%d ac:%d\n", light, fan, ac);
 }
+
 
 void connectWifi() {
   if (WiFi.status() == WL_CONNECTED) return;
@@ -109,6 +116,7 @@ void setup() {
   Serial.begin(115200);
   pinMode(PIN_PIR, INPUT);
   attachInterrupt(digitalPinToInterrupt(PIN_PIR), onMotion, RISING);
+  if (PIN_RADAR > 0) pinMode(PIN_RADAR, INPUT);
   pinMode(PIN_RELAY_LIGHT, OUTPUT); pinMode(PIN_RELAY_FAN, OUTPUT); pinMode(PIN_RELAY_AC, OUTPUT);
   applyCommands(false, false, false);          // safe start: everything OFF
   Wire.begin(PIN_SDA, PIN_SCL);
@@ -120,6 +128,25 @@ void setup() {
 }
 
 void loop() {
+  // Real-time sensor presence checking
+  bool pirActive = digitalRead(PIN_PIR) == HIGH;
+  bool radarActive = (PIN_RADAR > 0) && (digitalRead(PIN_RADAR) == HIGH);
+  if (motionLatched || pirActive || radarActive) {
+    lastMotionMs = millis();
+    motionLatched = true;
+  }
+
+  // AUTOMATIC SENSOR-BASED LIGHT SHUTOFF:
+  // If lights are ON but sensor detects NO person in the classroom for VACANCY_LIGHT_TIMEOUT,
+  // turn OFF the light relay immediately!
+  if (currentLight && (millis() - lastMotionMs >= VACANCY_LIGHT_TIMEOUT)) {
+    Serial.println("[SENSOR DETECT] No person detected in classroom -> Automatically switching OFF lights!");
+    setRelay(PIN_RELAY_LIGHT, false);
+    currentLight = false;
+    sendReport();  // notify backend and dashboard immediately
+  }
+
+  // Periodic report to server
   if (millis() - lastReport >= REPORT_INTERVAL) {
     lastReport = millis();
     if (!sendReport()) {
@@ -127,6 +154,7 @@ void loop() {
       if (millis() - lastMotionMs > FALLBACK_TIMEOUT) applyCommands(false, false, false);
     }
   }
-  if (motionLatched) lastMotionMs = millis();
+
   delay(50);
 }
+

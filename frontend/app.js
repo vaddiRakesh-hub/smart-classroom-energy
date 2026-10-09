@@ -192,6 +192,16 @@ async function renderDrawer() {
       <button data-mode="auto" aria-pressed="${!manual}">Automatic</button><button data-mode="manual" aria-pressed="${manual}">Manual</button></div>
     <div class="sw-row">${toggles}</div>
     <p class="hint">${manual ? "Automation is paused for this room. Switch back to Automatic to let the system decide again." : "Tap an appliance to take manual control of this room."}</p>
+    <h3>Sensor Automation & Live Test</h3>
+    <div style="display:flex;gap:.6rem;margin-top:.4rem">
+      <button class="sensor-test-btn on-btn" data-sensor="1" aria-label="Simulate person entered classroom">
+        👤 Person Entered
+      </button>
+      <button class="sensor-test-btn off-btn" data-sensor="0" aria-label="Simulate no person in classroom">
+        🚫 No Person (Turn Light OFF)
+      </button>
+    </div>
+    <p class="hint">Test sensor detection: when no person is available, lights turn OFF automatically.</p>
     <h3>Timetable today</h3>
     <ul class="sched">${h.timetable.length ? h.timetable.map((c) => {
       const f = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
@@ -205,10 +215,25 @@ async function sendOverride(body) {
   await refresh(true);
 }
 
-document.addEventListener("click", (e) => {
+document.addEventListener("click", async (e) => {
   const tile = e.target.closest(".tile");
   if (tile) return openDrawer(+tile.dataset.id);
   if (e.target.closest(".close") || e.target.id === "scrim") return closeDrawer();
+  const sBtn = e.target.closest("[data-sensor]");
+  if (sBtn && selected != null) {
+    const isOccupied = sBtn.dataset.sensor === "1";
+    drawerBusy = true;
+    try {
+      await api(`/api/classrooms/${selected}/sensor_test`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ occupied: isOccupied })
+      });
+    } finally {
+      drawerBusy = false;
+    }
+    return refresh(true);
+  }
   const mode = e.target.closest("[data-mode]");
   if (mode && selected != null) {
     const r = lastOverview?.rooms?.find((x) => x.id === selected);
@@ -224,6 +249,7 @@ document.addEventListener("click", (e) => {
     return sendOverride(next);
   }
 });
+
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && selected != null) closeDrawer(); });
 
 /* ---------- main loop ---------- */

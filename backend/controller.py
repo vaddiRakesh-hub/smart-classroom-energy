@@ -17,14 +17,20 @@ def decide(prob, f, prev, room):
     """
     pct = round(prob * 100)
     idle = f["mins_since_motion"]
+    pir = f.get("pir", 0)
 
-    # 1) Confidently empty -> everything OFF
-    if prob <= C.P_VACANT and idle >= C.GRACE_MIN:
-        why = f"Empty ({pct}% occupancy chance, no motion for {int(idle)} min) - all appliances OFF"
+    # 1) Confidently empty / No person detected by sensor -> lights and appliances OFF automatically
+    if (prob <= C.P_VACANT and idle >= C.GRACE_MIN) or (pir == 0 and idle >= C.GRACE_MIN):
+        why = f"Empty room - No person detected by sensor (PIR=0, {int(idle)} min idle) - lights and appliances turned OFF automatically"
         return 0, 0, 0, 0, why
 
+    if pir == 0 and not f["scheduled_now"] and prob <= C.P_VACANT:
+        why = f"Empty room - No person detected by sensor ({pct}% occupancy chance) - lights turned OFF automatically"
+        return 0, 0, 0, 0, why
+
+
     # 2) Uncertain or in Grace Period -> keep what we have (never switch off a room that may be in use)
-    if prob < C.P_OCCUPIED:
+    if prob < C.P_OCCUPIED and not pir:
         if prob <= C.P_VACANT:
             why = f"Grace period ({pct}% chance, idle for {int(idle)}/{C.GRACE_MIN} min) - holding state"
         else:

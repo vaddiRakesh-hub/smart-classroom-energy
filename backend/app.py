@@ -3,7 +3,7 @@
 Run:  python app.py        then open http://localhost:5000
 """
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from flask import Flask, jsonify, request, send_from_directory
 
@@ -13,7 +13,9 @@ import service
 from ml import predictor
 
 app = Flask(__name__, static_folder=C.FRONTEND_DIR, static_url_path="")
+app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024  # 1MB max request payload (DoS protection)
 sim = None
+
 
 
 # --------------------------------------------------------------------------
@@ -175,6 +177,42 @@ def override(rid):
              (latest_ts(), rid, "mode", f"Manual: lights {'ON' if light else 'OFF'}, fan {'ON' if fan else 'OFF'}"
                                        + (f", AC {'ON' if ac else 'OFF'}" if room["ac_w"] else "")))
     return jsonify(ok=True)
+
+
+@app.post("/api/classrooms/<int:rid>/sensor_test")
+def sensor_test(rid):
+    """Simulate real-time sensor event (person detected vs empty room).
+    Accepts JSON: { "occupied": false } or { "occupied": true }.
+    Automatically actuates light and appliances according to sensor occupancy.
+    """
+    room = service.rooms().get(rid)
+    if not room:
+        return jsonify(error="unknown classroom"), 404
+    body = request.get_json(force=True) or {}
+    has_person = bool(body.get("occupied", False))
+    now_str = latest_ts()
+    dt = datetime.fromisoformat(now_str)
+
+    if not has_person:
+        dt = dt + timedelta(minutes=C.GRACE_MIN + 5)
+        lux_val = 500.0  # daylight
+    else:
+        dt = dt + timedelta(minutes=C.STEP_MIN)
+        lux_val = 180.0  # dim light needing illumination
+
+    payload = dict(
+        classroom_id=rid,
+        pir=1 if has_person else 0,
+        temp=28.5 if has_person else 24.0,
+        humidity=60.0 if has_person else 50.0,
+        lux=lux_val,
+        ts=dt.isoformat(),
+        interval_min=C.STEP_MIN
+    )
+    result = service.process_telemetry(payload)
+    action = "Lights switched ON (Person detected)" if result["light"] else "Lights switched OFF automatically (No person detected by sensor)"
+    return jsonify(ok=True, action=action, telemetry=result)
+
 
 
 @app.get("/api/timetable")
