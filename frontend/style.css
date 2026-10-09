@@ -118,6 +118,11 @@ svg.chart text{font:11px "Instrument Sans",system-ui,sans-serif;fill:var(--muted
 .sched li{display:flex;justify-content:space-between;padding:.35rem 0;border-top:1px solid var(--line)}
 .sched li:first-child{border-top:0}
 
+.ai-btn{display:inline-flex;align-items:center;gap:.45rem;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.25);color:#fff;padding:.35rem .85rem;border-radius:20px;font-size:.85rem;font-weight:600;cursor:pointer;transition:all .2s ease}
+.ai-btn:hover{background:rgba(255,255,255,.28);border-color:#fff}
+.ai-btn svg{fill:var(--amber)}
+.advisor-panel{border-left:4px solid var(--green)}
+
 @media (max-width:980px){
   .cols,.cols.two{grid-template-columns:1fr}
   .stats{grid-template-columns:1fr 1fr}

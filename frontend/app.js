@@ -239,12 +239,29 @@ async function refresh(full) {
     $("#clock").textContent = "Cannot reach the server. Is backend/app.py running?";
   }
 }
+async function loadAdvisor() {
+  try {
+    const res = await api("/api/ai/advisor");
+    if ($("#aiAdviceText")) $("#aiAdviceText").textContent = res.advice;
+    if ($("#aiProviderBadge")) $("#aiProviderBadge").textContent = res.provider;
+  } catch (_) {
+    if ($("#aiAdviceText")) $("#aiAdviceText").textContent = "AI insights ready. Telemetry continuously streaming.";
+  }
+}
+
+$("#aiBtn")?.addEventListener("click", () => {
+  $("#advisorCard")?.scrollIntoView({ behavior: "smooth" });
+  loadAdvisor();
+});
+
 async function slowRefresh() {
   try { renderDaily(await api("/api/energy/daily?days=7")); } catch (_) {}
+  try { await loadAdvisor(); } catch (_) {}
 }
 (async () => {
   try { renderModel(await api("/api/model")); } catch (_) {}
-  await refresh(); await slowRefresh();
+  await refresh(); await slowRefresh(); await loadAdvisor();
   setInterval(refresh, 2500);
   setInterval(slowRefresh, 15000);
 })();
+

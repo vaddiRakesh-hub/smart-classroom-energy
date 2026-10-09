@@ -16,7 +16,13 @@
       <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M13 2 4 14h6l-1 8 9-12h-6z" fill="#F5B335"/></svg>
       <span>Smart Classroom Energy</span>
     </div>
-    <div class="clock" id="clock" aria-live="polite">Connecting...</div>
+    <div style="display:flex;align-items:center;gap:1rem">
+      <button class="ai-btn" id="aiBtn" aria-label="Ask Google Gemini AI Energy Advisor">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M12 2L14.4 7.6L20 10L14.4 12.4L12 18L9.6 12.4L4 10L9.6 7.6L12 2Z"/></svg>
+        AI Advisor
+      </button>
+      <div class="clock" id="clock" aria-live="polite">Connecting...</div>
+    </div>
   </header>
 
   <main>
@@ -60,7 +66,16 @@
         <p class="hint" id="importance"></p>
       </section>
     </div>
+
+    <section class="panel advisor-panel" id="advisorCard" style="margin-top:1.4rem">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
+        <h2>Google Gemini AI &bull; Campus Energy Advisor</h2>
+        <span class="badge" id="aiProviderBadge" style="background:var(--green)">Live AI</span>
+      </div>
+      <div id="aiAdviceText" style="line-height:1.6;font-size:.92rem;color:var(--ink);white-space:pre-wrap">Loading AI energy insights...</div>
+    </section>
   </main>
+
 
   <div class="scrim" id="scrim" hidden></div>
   <aside class="drawer" id="drawer" aria-hidden="true" aria-label="Classroom details"></aside>
